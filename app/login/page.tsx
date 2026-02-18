@@ -9,11 +9,7 @@ const COOLDOWN_SECONDS = 60;
 export default function LoginPage() {
   const router = useRouter();
 
-  const [mode, setMode] = useState<"email" | "phone">("email");
-
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
@@ -26,7 +22,7 @@ export default function LoginPage() {
     })();
   }, [router]);
 
-  // Restore cooldown
+  // Restore cooldown from localStorage
   useEffect(() => {
     const until = localStorage.getItem("loginCooldownUntil");
     if (until) {
@@ -35,7 +31,7 @@ export default function LoginPage() {
     }
   }, []);
 
-  // Countdown
+  // Countdown timer
   useEffect(() => {
     if (cooldown <= 0) return;
     const t = setInterval(() => {
@@ -50,50 +46,7 @@ export default function LoginPage() {
     setCooldown(COOLDOWN_SECONDS);
   };
 
-  // EMAIL LOGIN
-  const sendEmailLink = async () => {
-    const clean = email.trim().toLowerCase();
-    if (!clean || !clean.includes("@")) {
-      setMsg("Enter a valid email address.");
-      return;
-    }
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email: clean,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-
-    if (error) throw error;
-
-    startCooldown();
-    setMsg("🌙 Magic link sent. Check your inbox (and spam).");
-  };
-
-  // PHONE LOGIN (OTP)
-  const sendPhoneOtp = async () => {
-    const clean = phone.replace(/\s+/g, "");
-    if (!clean || clean.length < 8) {
-      setMsg("Enter a valid phone number.");
-      return;
-    }
-
-    const res = await fetch("/api/auth/phone/send-otp", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone: clean }),
-    });
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(data?.error || "Failed to send OTP");
-
-    startCooldown();
-    setMsg("📱 OTP sent via WhatsApp.");
-    router.push(`/login/verify?phone=${encodeURIComponent(clean)}`);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const sendLink = async (e: React.FormEvent) => {
     e.preventDefault();
     setMsg(null);
 
@@ -102,15 +55,33 @@ export default function LoginPage() {
       return;
     }
 
+    const clean = email.trim().toLowerCase();
+    if (!clean || !clean.includes("@")) {
+      setMsg("Enter a valid email address.");
+      return;
+    }
+
     setSending(true);
     try {
-      if (mode === "email") {
-        await sendEmailLink();
-      } else {
-        await sendPhoneOtp();
+      const { error } = await supabase.auth.signInWithOtp({
+        email: clean,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+
+      if (error) {
+        const msgLower = (error.message || "").toLowerCase();
+        if (msgLower.includes("rate") || msgLower.includes("limit")) {
+          throw new Error("Too many requests. Please wait a minute and try again.");
+        }
+        throw error;
       }
+
+      startCooldown();
+      setMsg("🌙 Magic link sent. Check your inbox (and spam).");
     } catch (err: any) {
-      setMsg(err?.message || "Something went wrong.");
+      setMsg(err?.message || "Failed to send link. Try again later.");
     } finally {
       setSending(false);
     }
@@ -139,65 +110,24 @@ export default function LoginPage() {
             One question per day. Answer once. Come back tomorrow ✨
           </p>
 
-          {/* Toggle */}
-          <div className="mt-4 flex gap-2">
-            {["email", "phone"].map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m as any)}
-                className={`flex-1 rounded-xl py-2 text-sm font-semibold transition ${
-                  mode === m
-                    ? "bg-amber-300 text-black"
-                    : "bg-black/30 text-white/70 hover:bg-black/40"
-                }`}
-              >
-                {m === "email" ? "Email" : "Phone"}
-              </button>
-            ))}
-          </div>
+          <form onSubmit={sendLink} className="mt-6 space-y-3">
+            <label className="text-sm font-semibold text-white/90">Email</label>
 
-          <form onSubmit={handleSubmit} className="mt-6 space-y-3">
-            {mode === "email" ? (
-              <>
-                <label className="text-sm font-semibold text-white/90">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none focus:border-amber-200/40 focus:ring-4 focus:ring-amber-200/10"
-                />
-              </>
-            ) : (
-              <>
-                <label className="text-sm font-semibold text-white/90">
-                  Phone (WhatsApp)
-                </label>
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="905xxxxxxxxx"
-                  className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none focus:border-amber-200/40 focus:ring-4 focus:ring-amber-200/10"
-                />
-              </>
-            )}
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none focus:border-amber-200/40 focus:ring-4 focus:ring-amber-200/10"
+              autoComplete="email"
+            />
 
             <button
               type="submit"
               disabled={disabled}
               className="w-full rounded-xl bg-gradient-to-r from-amber-200 to-yellow-400 px-4 py-3 font-extrabold text-black transition hover:brightness-110 disabled:opacity-60"
             >
-              {sending
-                ? "Sending…"
-                : cooldown > 0
-                ? `Wait ${cooldown}s`
-                : mode === "email"
-                ? "Send Magic Link ✉️"
-                : "Send OTP 📱"}
+              {sending ? "Sending…" : cooldown > 0 ? `Wait ${cooldown}s` : "Send Magic Link ✉️"}
             </button>
 
             {msg && <p className="text-sm text-white/80">{msg}</p>}
