@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   try {
-    const { phone } = await req.json();
+    const body = await req.json();
+    const phone = body?.phone;
 
     if (!phone) {
       return NextResponse.json(
@@ -12,9 +13,9 @@ export async function POST(req: Request) {
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes
 
-    // Store OTP in Supabase (service role)
+    // 🔹 INSERT OTP INTO SUPABASE
     const storeRes = await fetch(
       `${process.env.SUPABASE_URL}/rest/v1/phone_otps`,
       {
@@ -23,23 +24,26 @@ export async function POST(req: Request) {
           apikey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
           Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`,
           "Content-Type": "application/json",
+          Prefer: "return=minimal",
         },
         body: JSON.stringify({
-          phone,
-          otp,
+          phone: phone,
+          otp: otp,
           expires_at: expiresAt,
         }),
       }
     );
 
     if (!storeRes.ok) {
+      const errText = await storeRes.text();
+      console.error("SUPABASE INSERT ERROR:", errText);
       return NextResponse.json(
-        { error: "Failed to store OTP" },
+        { error: errText },
         { status: 500 }
       );
     }
 
-    // Send OTP via WhatsApp (WhatSend)
+    // 🔹 SEND OTP VIA WHATSAPP
     const sendRes = await fetch("https://app.whatsend.net/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -53,6 +57,8 @@ export async function POST(req: Request) {
     });
 
     if (!sendRes.ok) {
+      const errText = await sendRes.text();
+      console.error("WHATSAPP SEND ERROR:", errText);
       return NextResponse.json(
         { error: "Failed to send WhatsApp message" },
         { status: 500 }
@@ -60,7 +66,8 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err) {
+  } catch (err: any) {
+    console.error("SERVER ERROR:", err);
     return NextResponse.json(
       { error: "Server error" },
       { status: 500 }
