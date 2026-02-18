@@ -1,32 +1,36 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+// ✅ IMPORTANT:
+// Use ANON key so RLS applies (DO NOT use service role here)
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 function json(data: any, status = 200) {
   return NextResponse.json(data, { status });
 }
 
-// TEMP: if you haven't added role checks yet, keep it open.
-// If you DO have role checks, paste your version and I’ll wire it.
+// ✅ Anyone can READ questions (daily page, etc.)
 export async function GET() {
   try {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("questions")
-      .select("id,q_date,question_text,option_a,option_b,option_c,option_d,correct_option,points")
+      .select(
+        "id,q_date,question_text,option_a,option_b,option_c,option_d,correct_option,points"
+      )
       .order("q_date", { ascending: false })
       .limit(200);
 
-    if (error) return json({ error: error.message }, 500);
+    if (error) return json({ error: error.message }, 403);
     return json({ questions: data || [] }, 200);
   } catch (e: any) {
     return json({ error: e?.message || "Server error" }, 500);
   }
 }
 
+// 🔒 ONLY ADMIN can INSERT (RLS enforces this)
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -46,21 +50,17 @@ export async function POST(req: Request) {
     if (!payload.q_date || !payload.question_text) {
       return json({ error: "Missing required fields" }, 400);
     }
+
     if (!["A", "B", "C", "D"].includes(payload.correct_option)) {
       return json({ error: "correct_option must be A/B/C/D" }, 400);
     }
 
-    const { data: existing, error: exErr } = await supabaseAdmin
+    const { error } = await supabase
       .from("questions")
-      .select("id")
-      .eq("q_date", payload.q_date)
-      .maybeSingle();
+      .insert(payload);
 
-    if (exErr) return json({ error: exErr.message }, 500);
-    if (existing?.id) return json({ error: `Question already exists for ${payload.q_date}` }, 409);
-
-    const { error: insErr } = await supabaseAdmin.from("questions").insert(payload);
-    if (insErr) return json({ error: insErr.message }, 500);
+    // ❌ Non-admins fail here automatically because of RLS
+    if (error) return json({ error: error.message }, 403);
 
     return json({ status: "created" }, 201);
   } catch (e: any) {
