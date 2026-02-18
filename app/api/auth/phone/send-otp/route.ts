@@ -16,7 +16,7 @@ export async function POST(req: Request) {
 
     // Store OTP in Supabase (service role)
     const storeRes = await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/phone_otp`,
+      `${process.env.SUPABASE_URL}/rest/v1/phone_otps`,
       {
         method: "POST",
         headers: {
