@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const phone = body?.phone;
+    const { phone } = await req.json();
 
     if (!phone) {
       return NextResponse.json(
@@ -13,9 +12,9 @@ export async function POST(req: Request) {
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
 
-    // 🔹 INSERT OTP INTO SUPABASE
+    // 🔹 UPSERT OTP INTO SUPABASE (replace if phone exists)
     const storeRes = await fetch(
       `${process.env.SUPABASE_URL}/rest/v1/phone_otps`,
       {
@@ -24,11 +23,11 @@ export async function POST(req: Request) {
           apikey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
           Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`,
           "Content-Type": "application/json",
-          Prefer: "return=minimal",
+          Prefer: "resolution=merge-duplicates,return=minimal",
         },
         body: JSON.stringify({
-          phone: phone,
-          otp: otp,
+          phone,
+          otp,
           expires_at: expiresAt,
         }),
       }
@@ -36,14 +35,14 @@ export async function POST(req: Request) {
 
     if (!storeRes.ok) {
       const errText = await storeRes.text();
-      console.error("SUPABASE INSERT ERROR:", errText);
+      console.error("SUPABASE ERROR:", errText);
       return NextResponse.json(
-        { error: errText },
+        { error: "Failed to store OTP" },
         { status: 500 }
       );
     }
 
-    // 🔹 SEND OTP VIA WHATSAPP
+    // 🔹 SEND OTP VIA WHATSAPP (WhatSend)
     const sendRes = await fetch("https://app.whatsend.net/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -58,7 +57,7 @@ export async function POST(req: Request) {
 
     if (!sendRes.ok) {
       const errText = await sendRes.text();
-      console.error("WHATSAPP SEND ERROR:", errText);
+      console.error("WHATSAPP ERROR:", errText);
       return NextResponse.json(
         { error: "Failed to send WhatsApp message" },
         { status: 500 }
@@ -66,7 +65,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
+  } catch (err) {
     console.error("SERVER ERROR:", err);
     return NextResponse.json(
       { error: "Server error" },
